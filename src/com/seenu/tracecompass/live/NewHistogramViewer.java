@@ -54,7 +54,7 @@ public class NewHistogramViewer extends TmfBarChartViewer {
         /* Hide the legend */
         swtChart.getLegend().setVisible(false);
 
-        addSeries("Number of events", Display.getDefault().getSystemColor(SWT.COLOR_BLUE).getRGB()); //$NON-NLS-1$
+        addSeries("Number of events", Display.getDefault().getSystemColor(SWT.COLOR_GREEN).getRGB()); //$NON-NLS-1$
     }
 
     @Override
