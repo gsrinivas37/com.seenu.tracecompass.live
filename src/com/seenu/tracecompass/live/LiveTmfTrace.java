@@ -173,7 +173,7 @@ public class LiveTmfTrace extends TmfTrace implements ITmfEventParser{
 		long ts = Long.parseLong(events[0].getValue().toString());
 
 		final TmfEventField content = new TmfEventField(ITmfEventField.ROOT_FIELD_ID, null, events);
-		event = new TmfEvent(this, info, new TmfTimestamp(ts, ITmfTimestamp.MICROSECOND_SCALE), new TmfEventType(getTraceTypeId(), content), content);
+		event = new TmfEvent(this, info, new TmfTimestamp(ts, ITmfTimestamp.MILLISECOND_SCALE), new TmfEventType(getTraceTypeId(), content), content);
 		currentLoc = new TmfLongLocation(currentChunk*CHUNK_SIZE + fMappedByteBuffer.position());
 
 		return event;

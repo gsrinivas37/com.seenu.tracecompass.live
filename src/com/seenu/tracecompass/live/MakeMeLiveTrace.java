@@ -29,11 +29,11 @@ public class MakeMeLiveTrace {
 			for (int i = 0; i < 1000; i++) {
 				fos.write(intToByteArray(i));
 				System.out.print(i+",");
-				double sin = Math.sin(i*180/Math.PI)*100;
+				double sin = Math.sin(i*Math.PI/180)*100;
 				if(sin<0)
 					sin = -sin;
 
-				double cos = Math.cos(i*180/Math.PI)*100;
+				double cos = Math.cos(i*Math.PI/180)*100;
 				if(cos<0)
 					cos = -cos;
 
