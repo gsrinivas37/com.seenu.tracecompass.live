@@ -11,7 +11,7 @@ public class MakeMeLiveTrace {
 	
 	public static void main(String[] args) {
 		String[] fEventTypes = new String[] {"Time", "Sine Value", "Cos Value"};
-		final String fileLoc = System.getProperty("user.home") + File.separator + "sinetrace.live";
+		final String fileLoc = System.getProperty("user.home") + File.separator + "Desktop"+ File.separatorChar+"traces"+File.separatorChar+"sinetrace.live";
 		try (FileOutputStream fos = new FileOutputStream(fileLoc)) {
 			for (int i = 0; i < fEventTypes.length; i++) {
 				System.out.println(fEventTypes);
@@ -48,8 +48,16 @@ public class MakeMeLiveTrace {
 				fos.write(intToByteArray((int) sin));
 				System.out.println((int)cos);
 				fos.write(intToByteArray((int) cos));
-
+				try {
+					Thread.sleep(100);
+				} catch (InterruptedException e) {
+					e.printStackTrace();
+				}
+				fos.flush();
 			}
+			
+			fos.flush();
+			fos.close();
 		} catch (IOException e) {
 			e.printStackTrace();
 		}

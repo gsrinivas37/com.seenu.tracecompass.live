@@ -7,18 +7,21 @@ import java.nio.ByteBuffer;
 import java.nio.MappedByteBuffer;
 import java.nio.channels.FileChannel;
 import java.nio.channels.FileChannel.MapMode;
-
 import org.eclipse.core.resources.IProject;
 import org.eclipse.core.resources.IResource;
+import org.eclipse.core.runtime.IProgressMonitor;
 import org.eclipse.core.runtime.IStatus;
 import org.eclipse.core.runtime.Status;
+import org.eclipse.core.runtime.jobs.Job;
 import org.eclipse.tracecompass.tmf.core.event.ITmfEvent;
 import org.eclipse.tracecompass.tmf.core.event.ITmfEventField;
 import org.eclipse.tracecompass.tmf.core.event.TmfEvent;
 import org.eclipse.tracecompass.tmf.core.event.TmfEventField;
 import org.eclipse.tracecompass.tmf.core.event.TmfEventType;
 import org.eclipse.tracecompass.tmf.core.exceptions.TmfTraceException;
+import org.eclipse.tracecompass.tmf.core.signal.TmfTraceRangeUpdatedSignal;
 import org.eclipse.tracecompass.tmf.core.timestamp.ITmfTimestamp;
+import org.eclipse.tracecompass.tmf.core.timestamp.TmfTimeRange;
 import org.eclipse.tracecompass.tmf.core.timestamp.TmfTimestamp;
 import org.eclipse.tracecompass.tmf.core.trace.ITmfContext;
 import org.eclipse.tracecompass.tmf.core.trace.ITmfEventParser;
@@ -30,8 +33,10 @@ import org.eclipse.tracecompass.tmf.core.trace.location.TmfLongLocation;
 
 public class LiveTmfTrace extends TmfTrace implements ITmfEventParser{
 
-	ITmfLocation currentLoc = null;
-	long count;
+	TmfLongLocation currentLoc = null;
+	long parseEventCount;
+	
+	private boolean isComplete;
 
 	private long initOffset;
 	private long currentChunk;
@@ -43,7 +48,17 @@ public class LiveTmfTrace extends TmfTrace implements ITmfEventParser{
 
 	private static final long CHUNK_SIZE = 65536;
 
+	private long lastModified;
+	private boolean continueMonitoring;
+	private int fileModifiedCounter;
+	private Job monitorJob;
+	
 	public LiveTmfTrace() {
+	}
+	
+	@Override
+	public boolean isComplete() {
+		return isComplete;
 	}
 	
 	public LiveTmfTrace(IResource resource, Class<? extends ITmfEvent> type, String path, int cacheSize, long interval) throws TmfTraceException {
@@ -70,26 +85,123 @@ public class LiveTmfTrace extends TmfTrace implements ITmfEventParser{
 
 		return new Status(IStatus.ERROR, Activator.PLUGIN_ID, path+ " is not a live trace file"); //$NON-NLS-1$
 	}
+	
+	protected void fileUpdated() {
+		System.out.println("File is modified......");
+		sendTraceUpdatedSignal();
+	}
+	
+	private void sendTraceUpdatedSignal(){
+		ITmfTimestamp endTime = getEndTimeStampFromTrace();
+		if(endTime==null){
+			System.out.println("UNEXPECTED ERROR:");
+		}
+
+		ITmfTimestamp startTime = getStartTime();
+		TmfTraceRangeUpdatedSignal signal = new TmfTraceRangeUpdatedSignal(this, this, new TmfTimeRange(startTime, endTime));
+		broadcastAsync(signal);
+	}
+	
+	private ITmfTimestamp getEndTimeStampFromTrace(){
+		try {
+			long size = fFileChannel.size();
+			long numOfEvents = (size-initOffset)/12;
+			long lastRecPos = initOffset + (numOfEvents-1)*12;
+			
+			System.out.println("No. of records found: "+numOfEvents);
+			
+			MappedByteBuffer byteBuffer = fFileChannel.map(MapMode.READ_ONLY, lastRecPos, 12);
+			long value = getValue(byteBuffer);
+			System.out.println("New Time stamp: "+ value);
+			
+			if(fMappedByteBuffer!=null && currentLoc != null){
+				final long position = initOffset;
+				fMappedByteBuffer = fFileChannel.map(MapMode.READ_ONLY, position, size-position);
+				fMappedByteBuffer.position(currentLoc.getLocationInfo().intValue());
+			}
+			
+			return new TmfTimestamp(value);
+		} catch (IOException e) {
+			e.printStackTrace();
+		}
+		return null;
+	}
 
 	@Override
 	public void initTrace(IResource resource, String path, Class<? extends ITmfEvent> type, String name, String traceTypeId) throws TmfTraceException {
+		isComplete = false;
 		super.initTrace(resource, path, type, name, traceTypeId);
 		fFile = new File(path);
 		fFile.length();
-		count = 0 ;
+		parseEventCount = 0 ;
 
 		for(String eventType: fEventTypes){
 			initOffset+=eventType.length()+1;
 		}
+		
+		lastModified = fFile.lastModified();
+		continueMonitoring = true;
 
+		fileModifiedCounter = 0;
+		monitorJob = new Job("Monitoring hardware specifications") {
+			@Override
+			protected IStatus run(IProgressMonitor monitor) {
+				long modified = fFile.lastModified();
+				if(modified>lastModified){
+					lastModified = modified;
+					fileUpdated();
+					fileModifiedCounter = 0;
+				}else{
+					fileModifiedCounter++;
+					if(fileModifiedCounter==3){
+						setComplete(true);
+						continueMonitoring = false;
+					}
+					System.out.println("File is not updated:"+fileModifiedCounter);
+				}
+
+				if(continueMonitoring){
+					monitorJob.schedule(1000);
+				}
+				return Status.OK_STATUS;
+			}
+		};
+
+		monitorJob.setSystem(true);
+		monitorJob.setPriority(Job.DECORATE);
+		monitorJob.schedule();
+		
 		try {
 			fFileChannel = new FileInputStream(fFile).getChannel();
 			currentChunk = 0;
 			seekChunk(currentChunk);
+			currentLoc = new TmfLongLocation(fMappedByteBuffer.position());
 		} catch (IOException e) {
 		}
 	}
 
+	@Override
+	public synchronized void dispose() {
+		super.dispose();
+		
+		currentLoc = null;
+		try {
+			fFileChannel.close();
+		} catch (IOException e) {
+			e.printStackTrace();
+		}
+	}
+	
+	@Override
+	public void setComplete(boolean isComplete) {
+		isComplete = true;
+		super.setComplete(isComplete);
+		
+		System.out.println("Complete method called");
+		
+		sendTraceUpdatedSignal();
+	}
+	
 	private void seekChunk(long chunkNum) throws IOException {
 		final long position = initOffset + chunkNum*CHUNK_SIZE;
 		long size = Math.min((fFileChannel.size()-position), CHUNK_SIZE);
@@ -98,7 +210,9 @@ public class LiveTmfTrace extends TmfTrace implements ITmfEventParser{
 		}
 
 		fMappedByteBuffer = fFileChannel.map(MapMode.READ_ONLY, position, size);
-		currentLoc = new TmfLongLocation(position);
+		if(currentLoc!=null){
+			fMappedByteBuffer.position(currentLoc.getLocationInfo().intValue());
+		}
 	}
 
 	@Override
@@ -145,16 +259,21 @@ public class LiveTmfTrace extends TmfTrace implements ITmfEventParser{
 	public ITmfContext seekEvent(double ratio) {
 		return seekEvent((long)ratio*getNbEvents()/100);
 	}
-
+	
 	@Override
 	public ITmfEvent parseEvent(ITmfContext context) {
 		TmfLongLocation location = (TmfLongLocation) context.getLocation();
 		Long info = location.getLocationInfo();
 		TmfEvent event = null;
-		System.out.print("Count: "+ ++count);
+		System.out.print("Count: "+ ++parseEventCount);
 		System.out.println("; Parsing event rank: "+ context.getRank());
 
-		if(fMappedByteBuffer.position()==fMappedByteBuffer.limit()){
+		if(fMappedByteBuffer.remaining()<12){
+			try {
+				Thread.sleep(1000);
+			} catch (InterruptedException e1) {
+				e1.printStackTrace();
+			}
 			if(fMappedByteBuffer.limit()==CHUNK_SIZE){
 				try {
 					seekChunk(++currentChunk);
@@ -162,13 +281,20 @@ public class LiveTmfTrace extends TmfTrace implements ITmfEventParser{
 					e.printStackTrace();
 				}
 			}else{
-				return null;
+				try {
+					seekChunk(currentChunk);
+				} catch (IOException e) {
+					e.printStackTrace();
+				}
+				if(fMappedByteBuffer.remaining()<12){
+					return null;
+				}
 			}
 		}
 
 		final TmfEventField[] events = new TmfEventField[fEventTypes.length];
 		for(int i=0; i< events.length; i++){
-			events[i] = new TmfEventField(fEventTypes[i], getBigInteger(fMappedByteBuffer), null);
+			events[i] = new TmfEventField(fEventTypes[i], getValue(fMappedByteBuffer), null);
 		}
 		long ts = Long.parseLong(events[0].getValue().toString());
 
@@ -179,8 +305,8 @@ public class LiveTmfTrace extends TmfTrace implements ITmfEventParser{
 		return event;
 	}
 	
-	private long getBigInteger(ByteBuffer buffer){
-		long data = 0x00000000ffffffffL & fMappedByteBuffer.getInt();
+	private long getValue(ByteBuffer buffer){
+		long data = 0x00000000ffffffffL & buffer.getInt();
 		return data;
 	}
 }
