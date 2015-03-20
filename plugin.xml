@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<?eclipse version="3.4"?>
+<plugin>
+   <extension
+         point="org.eclipse.linuxtools.tmf.core.tracetype">
+      <type
+            event_type="org.eclipse.tracecompass.tmf.core.event.TmfEvent"
+            id="com.seenu.tracecompass.live.type"
+            isDirectory="false"
+            name="Live Trace Example"
+            trace_type="com.seenu.tracecompass.live.LiveTmfTrace">
+      </type>
+   </extension>
+   <extension
+         point="org.eclipse.linuxtools.tmf.ui.tracetypeui">
+      <type
+            tracetype="com.seenu.tracecompass.live.type">
+      </type>
+   </extension>
+   <extension
+         point="org.eclipse.ui.views">
+      <view
+            category="org.eclipse.linuxtools.tmf.ui.views.category"
+            class="com.seenu.tracecompass.live.NewHistogramView"
+            id="com.seenu.tracecompass.live.view.sine"
+            name="Sine View"
+            restorable="true">
+      </view>
+   </extension>
+   <extension
+         point="org.eclipse.linuxtools.tmf.core.analysis">
+      <module
+            analysis_module="com.seenu.tracecompass.live.TmfStatisticsModule2"
+            automatic="true"
+            id="com.seenu.tracecompass.live.module"
+            name="Sine Analysis Module">
+         <tracetype
+               class="com.seenu.tracecompass.live.LiveTmfTrace">
+         </tracetype>
+      </module>
+   </extension>
+
+</plugin>
